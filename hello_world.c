@@ -103,15 +103,16 @@ int main() {
 					gpio_put(PIN_SDI_ROW, 0);
 				}
 				//printf("  %d %d %d %d\n", x, y, pos_x, pos_y);
+
+				sleep_us(1);
+
+				gpio_put(PIN_CLK, 1);
+				sleep_us(1);
+				gpio_put(PIN_CLK, 0);
 				if(x == 15){
 					gpio_put(PIN_LE, 1);
 				}
 
-				sleep_us(1);
-				gpio_put(PIN_CLK, 1);
-				sleep_us(1);
-				gpio_put(PIN_CLK, 0);
-				sleep_us(1);
 				gpio_put(PIN_LE_ROW, 1);
 				if(x == 15){
 					gpio_put(PIN_LE, 0);
