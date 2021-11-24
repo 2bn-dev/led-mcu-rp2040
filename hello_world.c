@@ -36,11 +36,14 @@ const uint PIN_LE_ROW 	= 23;
 
 bool STATUS_LED_STATE = false;
 
-uint color = 0;
-uint pos_x = 0;
-uint pos_y = 0;
+uint color;
+uint pos_x;
+uint pos_y;
 
 int main() {
+	pos_x = 0;
+	pos_y = 0;
+	color = 0;
 	stdio_init_all();
 
 	gpio_init(PIN_STATUS_LED);
@@ -68,11 +71,7 @@ int main() {
 	while (true) {
 		for(uint y = 0; y < 16; y++){
 			for(uint x = 0; x < 16; x++){
-				if(x != pos_x || y != pos_y){
-					gpio_put(PIN_SDI_RED, 0);
-					gpio_put(PIN_SDI_BLUE, 0);
-					gpio_put(PIN_SDI_GREEN, 0);
-				}else{
+				if(x == pos_x && y == pos_y){
 					if(color < 100){
 						//red
 						gpio_put(PIN_SDI_RED, 1);
@@ -82,78 +81,77 @@ int main() {
 						//green
 						gpio_put(PIN_SDI_RED, 0);
 						gpio_put(PIN_SDI_BLUE, 0);
-						gpio_put(PIN_SDI_GREEN, 0);
+						gpio_put(PIN_SDI_GREEN, 1);
 					}else if(color < 300){
 						//blue
 						gpio_put(PIN_SDI_RED, 0);
-						gpio_put(PIN_SDI_BLUE, 0);
+						gpio_put(PIN_SDI_BLUE, 1);
 						gpio_put(PIN_SDI_GREEN, 0);
-					}else{
+					}else if(color < 400){
 						//white
+						gpio_put(PIN_SDI_RED, 1);
+						gpio_put(PIN_SDI_BLUE, 1);
+						gpio_put(PIN_SDI_GREEN, 1);
+					}else{
+						//off
 						gpio_put(PIN_SDI_RED, 0);
 						gpio_put(PIN_SDI_BLUE, 0);
 						gpio_put(PIN_SDI_GREEN, 0);
 					}
+				}else{
+					gpio_put(PIN_SDI_RED, 0);
+					gpio_put(PIN_SDI_BLUE, 0);
+					gpio_put(PIN_SDI_GREEN, 0);
 				}
 
 				
-				if(y == pos_y){
-					gpio_put(PIN_SDI_ROW, 1);
-				}else{
+				if(x == pos_y){ // confusing, but works.
 					gpio_put(PIN_SDI_ROW, 0);
+				}else{
+					gpio_put(PIN_SDI_ROW, 1);
 				}
-				//printf("  %d %d %d %d\n", x, y, pos_x, pos_y);
 
 				sleep_us(1);
-
 				gpio_put(PIN_CLK, 1);
 				sleep_us(1);
 				gpio_put(PIN_CLK, 0);
-				if(x == 15){
-					gpio_put(PIN_LE, 1);
-				}
-
-				gpio_put(PIN_LE_ROW, 1);
-				if(x == 15){
-					gpio_put(PIN_LE, 0);
-				}
 				sleep_us(1);
-				gpio_put(PIN_LE_ROW, 0);
-				sleep_us(1);
-
-				
 			}
-			/*
-			if(y == pos_y){
-                        	gpio_put(PIN_SDI_ROW, 1);
-                        }else{
-                                gpio_put(PIN_SDI_ROW, 0);
-                        }*/
+
+			gpio_put(PIN_LE, 1);
+			sleep_us(1);
+			gpio_put(PIN_LE, 0);
+			sleep_us(1);
+			gpio_put(PIN_LE_ROW, 1);
+			sleep_us(1);
+			gpio_put(PIN_LE_ROW, 0);
 
 
+			gpio_put(PIN_OE, 0);
+			sleep_us(1);
+			gpio_put(PIN_OE, 1);
+			sleep_us(9);
 
 			if(STATUS_LED_STATE){
 				gpio_put(PIN_STATUS_LED, 0);
-				gpio_put(PIN_OE, 1);
 				STATUS_LED_STATE = false;
-				sleep_us(90);
 			}else{
 				gpio_put(PIN_STATUS_LED, 1);
-				gpio_put(PIN_OE, 0);
 				STATUS_LED_STATE = true;
-				sleep_us(10);
 			}
 
 		}
+
+
 		color += 1;
-		if(color > 400){
+		if(color > 500){
 			color = 0;
-			pos_y += 1;
-			if(pos_y > 15){
-				pos_y = 0;
-				pos_x += 1;
-				if(pos_x > 15){
-					pos_x = 0;
+			pos_x += 1;
+			if(pos_x > 15){
+				pos_x = 0;
+				pos_y += 1;
+				if(pos_y > 15){
+					pos_y = 0;
 				}
 			}
 			printf("%d %d\n", pos_x, pos_y);
