@@ -31,7 +31,6 @@ int main() {
 	led_pio_program_init(pio, sm, offset);
 
 
-	static uint8_t txbuf[BUF_SIZE];
 	
 	gpio_init(PIN_STATUS_LED);
 	/*
@@ -77,7 +76,8 @@ int main() {
 
 
 					int brightness_limit = pwm+dim;
-					if(brightness_limit%(color_red+(chance/4)) <1){
+					//if(brightness_limit%(color_red+(chance/4)) <1){
+					if(0){
 						//red
 						//gpio_put(PIN_SDI_RED, 1);
 						local_buf = 0b1;
