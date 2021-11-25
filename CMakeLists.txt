@@ -19,8 +19,19 @@ add_executable(heavy_lifting_test
 	heavy_lifting_test.c
 )
 
-pico_generate_pio_header(heavy_lifting_test ${CMAKE_CURRENT_LIST_DIR}/pinout/2bn-mcumz16163-a.pio)
-pico_generate_pio_header(hello_world ${CMAKE_CURRENT_LIST_DIR}/pinout/2bn-mcumz16163-a.pio)
+pico_generate_pio_header(
+	heavy_lifting_test 
+	${CMAKE_CURRENT_LIST_DIR}/pinout/2bn-mcumz16163-a.pio
+	)
+pico_generate_pio_header(
+	heavy_lifting_test
+	${CMAKE_CURRENT_LIST_DIR}/led_dma.pio
+	)
+
+pico_generate_pio_header(
+	hello_world 
+	${CMAKE_CURRENT_LIST_DIR}/pinout/2bn-mcumz16163-a.pio
+	)
 
 
 # Add pico_stdlib library which aggregates commonly used features
@@ -28,12 +39,15 @@ target_link_libraries(
 	hello_world 
 	pico_stdlib
 	hardware_pio
+	pico_time
 	)
 target_link_libraries(
 	heavy_lifting_test
        	pico_stdlib 
 	hardware_pio
+	pico_time
 	)
+
 pico_enable_stdio_usb(hello_world 1)
 pico_enable_stdio_uart(hello_world 0)
 pico_enable_stdio_usb(heavy_lifting_test 1)

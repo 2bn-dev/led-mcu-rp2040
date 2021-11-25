@@ -1,0 +1,56 @@
+/*
+.define PUBLIC PIN_SDI_RED   16
+.define PUBLIC PIN_SDI_BLUE  17
+.define PUBLIC PIN_SDI_GREEN  18
+.define PUBLIC PIN_SDI_ROW   19
+.define PUBLIC PIN_LE        20
+.define PUBLIC PIN_CLK       21
+.define PUBLIC PIN_OE        22
+.define PUBLIC PIN_LE_ROW    23
+*/
+
+
+.program led_pio
+//    set pindirs, 8   ; Set pin to output
+.wrap_target
+	out pins, 8 [1]
+.wrap
+
+
+% c-sdk {
+static inline void led_pio_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = led_pio_program_get_default_config(offset);
+
+    // Set the IN base pin to the provided `pin` parameter. This is the data
+    // pin, and the next-numbered GPIO is used as the clock pin.
+    sm_config_set_out_pins(&c, PIN_SDI_RED, 8);
+
+    // Set the pin directions to output at the PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, PIN_SDI_RED, 8, true);
+    // Connect these GPIOs to this PIO block
+    pio_gpio_init(pio, PIN_SDI_RED);
+    pio_gpio_init(pio, PIN_SDI_BLUE);
+    pio_gpio_init(pio, PIN_SDI_GREEN);
+    pio_gpio_init(pio, PIN_SDI_ROW);
+    pio_gpio_init(pio, PIN_LE);
+    pio_gpio_init(pio, PIN_CLK);
+    pio_gpio_init(pio, PIN_OE);
+    pio_gpio_init(pio, PIN_LE_ROW);
+
+
+    // Shifting to left matches the customary MSB-first ordering of SPI.
+    sm_config_set_out_shift(
+        &c,
+        false,  // Shift-to-right 
+        true,  // Autopush enabled
+        32      // Autopush threshold = 8
+    );
+
+    // We only TX
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    // Load our configuration, and start the program from the beginning
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
