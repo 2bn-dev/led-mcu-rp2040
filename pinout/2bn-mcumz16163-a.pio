@@ -1,0 +1,30 @@
+.define PUBLIC PIN_TXD0  0
+.define PUBLIC PIN_RXD0  1
+.define PUBLIC PIN_CTS0  2
+.define PUBLIC PIN_RTS0  3
+.define PUBLIC PIN_TXD1  4
+.define PUBLIC PIN_RXD1  5
+.define PUBLIC PIN_CTS1  6
+.define PUBLIC PIN_RTS1  7
+
+.define PUBLIC PIN_I2C0_SDA  8
+.define PUBLIC PIN_I2C0_SCL  9
+
+.define PUBLIC PIN_STATUS_LED  10
+
+.define PUBLIC PIN_I2S_DATA  11
+.define PUBLIC PIN_I2S_WS    12
+
+.define PUBLIC PIN_ESP32_EN  13
+.define PUBLIC PIN_ESP32_FLASH  14
+
+.define PUBLIC PIN_SRAM_CE   15
+
+.define PUBLIC PIN_SDI_RED   16
+.define PUBLIC PIN_SDI_BLUE  17
+.define PUBLIC PIN_SDI_GREEN  18
+.define PUBLIC PIN_SDI_ROW   19
+.define PUBLIC PIN_LE        20
+.define PUBLIC PIN_CLK       21
+.define PUBLIC PIN_OE        22
+.define PUBLIC PIN_LE_ROW    23
