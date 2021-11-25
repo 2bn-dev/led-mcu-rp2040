@@ -1,38 +1,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
+#include "2bn-mcumz16163-a.pio.h"
 
-
-
-const uint PIN_TXD0 = 0;
-const uint PIN_RXD0 = 1;
-const uint PIN_CTS0 = 2;
-const uint PIN_RTS0 = 3;
-const uint PIN_TXD1 = 4;
-const uint PIN_RXD1 = 5;
-const uint PIN_CTS1 = 6;
-const uint PIN_RTS1 = 7;
-
-const uint PIN_I2C0_SDA = 8;
-const uint PIN_I2C0_SCL = 9;
-
-const uint PIN_STATUS_LED = 10;
-
-const uint PIN_I2S_DATA = 11;
-const uint PIN_I2S_WS 	= 12;
-
-const uint PIN_ESP32_EN = 13;
-const uint PIN_ESP32_FLASH = 14;
-
-const uint PIN_SRAM_CE 	= 15;
-
-const uint PIN_SDI_RED 	= 16;
-const uint PIN_SDI_BLUE = 17;
-const uint PIN_SDI_GREEN = 18;
-const uint PIN_SDI_ROW 	= 19;
-const uint PIN_LE 	= 20;
-const uint PIN_CLK 	= 21;
-const uint PIN_OE 	= 22;
-const uint PIN_LE_ROW 	= 23;
 
 bool STATUS_LED_STATE = false;
 
