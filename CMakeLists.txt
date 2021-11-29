@@ -46,6 +46,10 @@ target_link_libraries(
        	pico_stdlib 
 	hardware_pio
 	pico_time
+	pico_platform
+	pico_multicore
+	hardware_dma
+	hardware_irq
 	)
 
 pico_enable_stdio_usb(hello_world 1)
@@ -58,4 +62,6 @@ pico_enable_stdio_uart(heavy_lifting_test 0)
 # create map/bin/hex/uf2 file in addition to ELF.
 pico_add_extra_outputs(hello_world)
 pico_add_extra_outputs(heavy_lifting_test)
+
+
 
