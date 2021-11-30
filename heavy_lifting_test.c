@@ -11,6 +11,10 @@
 #include "hardware/irq.h"
 #include <inttypes.h>
 
+
+#include "hardware/structs/rosc.h"
+
+
 typedef struct {
 	        int32_t pixel[17][17];
 } frame_matrix_t;
@@ -74,11 +78,12 @@ frame_matrix_t frame_matrix;
 #define DIM_MIN 0
 #define DIM_PERIOD 1000000 // in Microseconds
 #define DIM_STEPS DIM_MAX-DIM_MIN
-#define DIM_COUNTER_DIVISOR 10
+#define DIM_COUNTER_DIVISOR 2
 
 
 uint main() {
 	stdio_init_all();
+
 
 	multicore_launch_core1(core1_entry);
 
@@ -88,6 +93,8 @@ uint main() {
 
 	return 0;
 }
+
+
 
 // Some DMA code copy pasted from https://github.com/raspberrypi/pico-examples/blob/master/pio/ws2812/ws2812_parallel.c
 // bit plane content dma channel
@@ -141,8 +148,11 @@ void __isr dma_complete_handler() {
 }
 
 void core1_entry(){
-	//TODO: not super random...
-	srand(7);
+	int32_t seed = 0;
+	for( uint8_t i = 0; i <32; i++){
+		seed |= (rosc_hw->randombit<<i);
+	}
+	srand(seed);
 
 	PIO pio = pio0;
 	uint offset = pio_add_program(pio, &led_pio_program);
@@ -248,7 +258,7 @@ void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_ro
         }
 }
 
-void __attribute__((noinline, section(".time_critical"))) update_frame_matrix(frame_matrix_t *frame_matrix, uint32_t i){
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_scan_x_y(frame_matrix_t *frame_matrix, uint32_t i){
         if(i%5 == 0){
                 frame_matrix->pixel[0][0] += 1;
                 if(frame_matrix->pixel[0][0] > 16){
@@ -270,7 +280,7 @@ void __attribute__((noinline, section(".time_critical"))) update_frame_matrix(fr
 	}
 }
 
-void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_random(frame_matrix_t *frame_matrix, uint32_t i){
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_random_per_pixel(frame_matrix_t *frame_matrix, uint32_t i){
 	if(i % 20 != 0){
 		return;
 	}
@@ -300,10 +310,10 @@ void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_ra
 				b = 0;
 				g = 0;
 			}else if ( test == 6){
-				r = 0;
-				b = 0;
-				g = 0;
-			}
+                                r = 0;
+                                b = 0;
+                                g = 0;
+                        }
 
 			
 
@@ -312,8 +322,57 @@ void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_ra
 	}
 }
 
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_random_per_pixeasdl(frame_matrix_t *frame_matrix, uint32_t i){
+	for( int32_t x = 1; x <= 16; x++){
+	        for( int32_t y = 1; y <= 16; y++){
+		}
+	}
+}
+
+
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix(frame_matrix_t *frame_matrix, uint32_t i){
+	int32_t val;
+	uint8_t test;
+	if(i == 0 || dim == DIM_MIN){
+		val = rand();
+		frame_matrix->pixel[0][0] = val;
+		test = rand()/(RAND_MAX>>3); //0-7
+		frame_matrix->pixel[0][1] = test;
+	}else{
+		val = frame_matrix->pixel[0][0];
+		test = frame_matrix->pixel[0][1];
+	}
+
+		uint8_t r = (val & 0x0000ff) >> 3;
+                uint8_t b = (val & 0x00ff00) >> 8+3;
+                uint8_t g = (val & 0xff0000) >> 16+3;
+
+                        if(test == 0){
+                                r = 0; 
+                        }else if (test == 1){
+                                b = 0; 
+                        }else if (test == 2){
+                                g = 0; 
+                        }else if (test == 3){
+                                r = 0;
+                                b = 0; 
+                        }else if (test == 4){
+                                r = 0;
+                                g = 0; 
+                        }else if( test == 5){
+                                b = 0;
+                                g = 0;
+                        }
+                        
+        for( int32_t x = 1; x <= 16; x++){
+                for( int32_t y = 1; y <= 16; y++){
+			int32_t chance = dim*(x*y)/DIM_MAX;
+                        frame_matrix->pixel[x][y] = (chance*r/256) | ((chance*b/256) << 8) | ((chance*g/256) << 16);
+                }
+        }
+}
+
 void __attribute__((noinline, section(".time_critical"))) update_dim(){
-	return;
 	if(dim_polarity){
         	dim_counter++;
         }else{
@@ -327,7 +386,6 @@ void __attribute__((noinline, section(".time_critical"))) update_dim(){
 		dim_polarity = !dim_polarity;
 		dim = DIM_MAX;
 		dim_counter = DIM_MAX*DIM_COUNTER_DIVISOR;
-		//randomize_color();
 	}else if(dim < DIM_MIN){
 		dim = DIM_MIN;
 		dim_counter = DIM_MIN*DIM_COUNTER_DIVISOR;
@@ -361,7 +419,7 @@ void __attribute__((noinline, section(".time_critical"))) randomize_color(){
 */
 
 void __attribute__((noinline, section(".time_critical"))) render_led_frame(PIO pio, uint sm, frame_matrix_t *frame_matrix){
-        for(int32_t pwm = dim; pwm < 64+dim; pwm++){
+        for(int32_t pwm = 0; pwm < 64; pwm++){
                 for(int32_t y = 1; y <= 16; y++){
 			for(int32_t x = 16; x >= 1; x-=2){
 			uint32_t buf;

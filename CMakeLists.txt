@@ -19,6 +19,9 @@ add_executable(heavy_lifting_test
 	heavy_lifting_test.c
 )
 
+add_executable(uart_bridge
+	uart_bridge.c)
+
 pico_generate_pio_header(
 	heavy_lifting_test 
 	${CMAKE_CURRENT_LIST_DIR}/pinout/2bn-mcumz16163-a.pio
@@ -51,17 +54,25 @@ target_link_libraries(
 	hardware_dma
 	hardware_irq
 	)
+target_link_libraries(
+	uart_bridge
+	pico_stdlib
+	hardware_uart
+	)
 
 pico_enable_stdio_usb(hello_world 1)
 pico_enable_stdio_uart(hello_world 0)
 pico_enable_stdio_usb(heavy_lifting_test 1)
 pico_enable_stdio_uart(heavy_lifting_test 0)
+pico_enable_stdio_usb(uart_bridge 1)
+pico_enable_stdio_uart(uart_bridge 0)
 
 
 
 # create map/bin/hex/uf2 file in addition to ELF.
 pico_add_extra_outputs(hello_world)
 pico_add_extra_outputs(heavy_lifting_test)
+pico_add_extra_outputs(uart_bridge)
 
 
 
