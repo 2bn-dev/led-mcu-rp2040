@@ -19,5 +19,6 @@ It does NOT use WS2812 LEDs. Details will be available soon.
    * random_corner_breath
       * Randomly chooses a single color, then uses a "breath" dimming effect to "grow" out of a corner and then recede. Color changes after screen dims.
  * RP2040 -> ESP32 uart0 bridge via RP2040 USB for flashing
+ * Automatic ESPtool flash detection and ESP32 bootloader mode (via ESP_SYNC command on USB UART)
 ### Planned features
   
