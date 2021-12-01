@@ -6,7 +6,7 @@ This is firmware for an RP2040 to drive a 16x16xRGB LED matrix of my own design.
 It does NOT use WS2812 LEDs. Details will be available soon.
 
 ### Implemented Features
- * 100 FPS 16x16 LED Matrix control 
+ * 100 FPS 16x16 LED Matrix RGB control via RP2040 PIO
  * Matrix patterns:  
    * test_row_by_row_y
      * Test pattern that lights up all pixels in a column and scrolls through all columns
