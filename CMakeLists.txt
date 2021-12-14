@@ -41,10 +41,11 @@ target_link_libraries(
 	hardware_irq
 	tinyusb_multitool
 	kxtj3
+	pico_stdio_uart
 	)
 
 pico_enable_stdio_usb(heavy_lifting_test 0)
-pico_enable_stdio_uart(heavy_lifting_test 0)
+pico_enable_stdio_uart(heavy_lifting_test 1)
 
 
 

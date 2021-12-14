@@ -1,5 +1,6 @@
 #include "heavy_lifting_test.h"
 #include "tinyusb_multitool.h"
+#include "pico/stdio_uart.h"
 //#include "kxtj3.h"
 
 
@@ -9,11 +10,20 @@ int32_t dim_counter = 0;
 bool dim_polarity = false;
 frame_matrix_t frame_matrix;
 
+void flash_pending_cb(){
+	multicore_fifo_push_blocking(1);
+	multicore_fifo_pop_blocking(); // Return when we receive a response
+	return;
+}
 
-uint main() {
+
+int main() {
+	multicore_lockout_victim_init(); // Used for flashing
+	stdio_init_all();
+	multicore_reset_core1(); // Need reset for hot-restarts to work right
 	multicore_launch_core1(core1_entry);
 
-        tumt_usb_init();
+        tumt_usb_init(flash_pending_cb);
         tumt_uart_bridge_uart0_init(115200);
         tumt_uart_bridge_uart1_init(921600);
         tumt_uart_bridge_pin_init();
@@ -59,7 +69,7 @@ const led_matrix_mode_t led_matrix_modes[] = {
 
 
 
-void (*update_frame_matrix)(frame_matrix_t*, uint32_t) = (led_matrix_modes[0].ptr);
+void (*update_frame_matrix)(frame_matrix_t*, uint32_t) = (led_matrix_modes[3].ptr);
 
 
 
@@ -169,6 +179,17 @@ void core1_entry(){
 		i++;
 		if(i > 1001){
 			i = 1;
+		}
+		if(i % 100 == 0){
+			printf("Checking multicore_fifo_rvalid\n");
+			if(multicore_fifo_rvalid()){
+				printf("Got message on fifo, killing core1\n");
+				//If we got something on the fifo, it's time to die.
+				pio_sm_set_enabled(pio, sm, false);
+			 	pio_sm_unclaim(pio, sm);
+				multicore_fifo_push_blocking(1);
+				return;
+			}
 		}
 	
 	}

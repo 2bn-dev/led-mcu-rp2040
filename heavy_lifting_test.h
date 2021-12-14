@@ -103,3 +103,4 @@ void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_ra
 void __attribute__((noinline, section(".time_critical"))) update_dim();
 void __attribute__((noinline, section(".time_critical"))) randomize_color();
 void __attribute__((noinline, section(".time_critical"))) render_led_frame(PIO pio, uint sm, frame_matrix_t *frame_matrix);
+void flash_pending_cb();
