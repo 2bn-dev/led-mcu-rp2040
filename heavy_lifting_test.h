@@ -10,6 +10,7 @@
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include <inttypes.h>
+#include "pico/runtime.h"
 
 
 #include "hardware/structs/rosc.h"
@@ -64,24 +65,23 @@ typedef struct {
 #define DIM_MIN 0
 #define DIM_PERIOD 1000000 // in Microseconds
 #define DIM_STEPS DIM_MAX-DIM_MIN
-#define DIM_COUNTER_DIVISOR 2
+#define DIM_COUNTER_DIVISOR 8
 
+#define BYTES_PER_PACKET 4 	// As above, each packet is two clock cycles, off on for each pixel.
+#define PACKETS_PER_X 10 	// since there are 2 pixels in a packet, 8 packets per row, also includes 1 latch packet and 1 flush packet per row
+#define X_PER_Y 16 		// 16 columns
+#define PWM_MAX 64 		// Defines colorspace, 0-64 brightness levels.
 
+#define BYTES_PER_FRAME BYTES_PER_PACKET*PACKETS_PER_X*X_PER_Y*PWM_MAX
 
-
-/************************
- * unused
- */
 
 // Some DMA code copy pasted from https://github.com/raspberrypi/pico-examples/blob/master/pio/ws2812/ws2812_parallel.c
-// bit plane content dma channel
-#define DMA_CHANNEL 0
 
-// chain channel for configuring main dma channel to output from disjoint 8 word fragments of memory
-#define DMA_CB_CHANNEL 1
-#define DMA_CHANNEL_MASK (1u << DMA_CHANNEL)
-#define DMA_CB_CHANNEL_MASK (1u << DMA_CB_CHANNEL)
-#define DMA_CHANNELS_MASK (DMA_CHANNEL_MASK | DMA_CB_CHANNEL_MASK)
+#define DMA_CHANNEL_A 0
+#define DMA_CHANNEL_B 1
+#define DMA_CHANNEL_A_MASK (1u << DMA_CHANNEL_A)
+#define DMA_CHANNEL_B_MASK (1u << DMA_CHANNEL_B)
+#define DMA_CHANNELS_MASK (DMA_CHANNEL_A_MASK | DMA_CHANNEL_B_MASK)
 
 
 typedef struct {
@@ -93,14 +93,19 @@ typedef struct {
 
 
 void dma_init(PIO pio, uint sm);
-void __isr dma_complete_handler();
+void __isr dma_complete_handler_a();
+void __isr dma_complete_handler_b();
 void core1_entry();
+void __attribute__((section(".time_critical"))) check_should_i_die();
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_row_by_row_y(frame_matrix_t *frame_matrix, uint32_t i);
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_row_by_row_x(frame_matrix_t *frame_matrix, uint32_t i);
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_scan_x_y(frame_matrix_t *frame_matrix, uint32_t i);
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_random_per_pixel(frame_matrix_t *frame_matrix, uint32_t i);
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_random_corner_breath(frame_matrix_t *frame_matrix, uint32_t i);
-void __attribute__((noinline, section(".time_critical"))) update_dim();
-void __attribute__((noinline, section(".time_critical"))) randomize_color();
-void __attribute__((noinline, section(".time_critical"))) render_led_frame(PIO pio, uint sm, frame_matrix_t *frame_matrix);
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_random_brightness_test(frame_matrix_t *frame_matrix, uint32_t i);
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_kxtj3(frame_matrix_t *frame_matrix, uint32_t i);
+void __attribute__((section(".time_critical"))) update_dim();
+void __attribute__((section(".time_critical"))) randomize_color();
+void __attribute__((section(".time_critical"))) render_led_frame(frame_matrix_t *frame_matrix, uint8_t dma_channel);
+void __attribute__((section(".time_critical"))) do_render_frame(uint8_t dma_channel_output);
 void flash_pending_cb();

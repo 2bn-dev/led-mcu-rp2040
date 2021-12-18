@@ -1,25 +1,47 @@
+//#define USE_STACK_GUARDS 0
+
+#define PIN_I2C_SDA 8
+#define PIN_I2C_SCL 9
+
+#define PICO_STDOUT_MUTEX 0
+
+
 #include "heavy_lifting_test.h"
 #include "tinyusb_multitool.h"
 #include "pico/stdio_uart.h"
-//#include "kxtj3.h"
-
+#include "kxtj3.h"
+#include "pico/runtime.h"
 
 
 int32_t dim = 0;
 int32_t dim_counter = 0;
 bool dim_polarity = false;
+uint32_t program_counter = 0;
+
 frame_matrix_t frame_matrix;
 
+//enough space for 2 sequential frames, then we alternate between them on IRQ.
+uint32_t * dma_address[2];
+
+PIO pio;
+uint sm;
+
+bool STATUS_LED_STATE = false;
+
 void flash_pending_cb(){
-	multicore_fifo_push_blocking(1);
-	multicore_fifo_pop_blocking(); // Return when we receive a response
+	printf("Received flash pending callback, attempting to kill core1\n");
+	multicore_fifo_push_blocking(0xdead);
+	printf("Successfully sent core1 death signal, checking for response\n");
+
+	uint32_t ret = multicore_fifo_pop_blocking(); // Return when we receive a response
+	printf("Received response from core1 0x%x", ret);
 	return;
 }
 
 
 int main() {
 	multicore_lockout_victim_init(); // Used for flashing
-	stdio_init_all();
+	//stdio_init_all();
 	multicore_reset_core1(); // Need reset for hot-restarts to work right
 	multicore_launch_core1(core1_entry);
 
@@ -29,8 +51,8 @@ int main() {
         tumt_uart_bridge_pin_init();
 
 	while(true){
-		printf("Alive! %" PRId64 "\n", get_absolute_time());
-		sleep_ms(100);
+		printf("core0 Alive! %" PRId64 "\n", get_absolute_time());
+		sleep_ms(1000);
 	}
 
 	return 0;
@@ -63,138 +85,176 @@ const led_matrix_mode_t led_matrix_modes[] = {
 		.ptr = update_frame_matrix_random_corner_breath,
 		.function_name = "random_corner_breath", 
 		.pretty_name = "Random Corner Breath",
+	},
+	{
+		.ptr = update_frame_matrix_random_brightness_test,
+		.function_name = "random_brightness_test",
+		.pretty_name = "Random Brightness Test",
+	},
+	{
+		.ptr = update_frame_matrix_kxtj3,
+		.function_name = "kxtj3",
+		.pretty_name = "kxtj3",
 	}
 };
 
 
 
 
-void (*update_frame_matrix)(frame_matrix_t*, uint32_t) = (led_matrix_modes[3].ptr);
+void (*update_frame_matrix)(frame_matrix_t*, uint32_t) = (led_matrix_modes[4].ptr);
 
 
 
 void dma_init(PIO pio, uint sm){
+
+	dma_address[DMA_CHANNEL_A] = malloc(BYTES_PER_FRAME);
+	dma_address[DMA_CHANNEL_B] = malloc(BYTES_PER_FRAME);
+	memset(dma_address[DMA_CHANNEL_A], 0x0, BYTES_PER_FRAME);
+	memset(dma_address[DMA_CHANNEL_B], 0x0, BYTES_PER_FRAME);
+
+	do_render_frame(DMA_CHANNEL_A);
+	do_render_frame(DMA_CHANNEL_B);
+
 	dma_claim_mask(DMA_CHANNELS_MASK);
 
-	dma_channel_config channel_config = dma_channel_get_default_config(DMA_CHANNEL);
-	channel_config_set_dreq(&channel_config, pio_get_dreq(pio, sm, true));
-	channel_config_set_chain_to(&channel_config, DMA_CB_CHANNEL);
-	channel_config_set_irq_quiet(&channel_config, true);
-	dma_channel_configure(DMA_CHANNEL,
-        		&channel_config,
+	dma_channel_config channel_config_a = dma_channel_get_default_config(DMA_CHANNEL_A);
+	channel_config_set_dreq(&channel_config_a, pio_get_dreq(pio, sm, true));
+	channel_config_set_transfer_data_size(&channel_config_a, DMA_SIZE_32);
+	//channel_config_set_chain_to(&channel_config_a, DMA_CHANNEL_B);
+	channel_config_set_irq_quiet(&channel_config_a, false);
+	channel_config_set_ring(&channel_config_a, true, 1);
+	dma_channel_configure(DMA_CHANNEL_A,
+        		&channel_config_a,
 			&pio->txf[sm],
-			NULL, // set by chain
-			8, // 8 words for 8 bit planes
+			dma_address[DMA_CHANNEL_A], // 
+			BYTES_PER_FRAME/4, // 4 bytes per packet, 8 packets per X, 16 Y, 64 PWM
 			false
 			);
 
-	// chain channel sends single word pointer to start of fragment each time
-	dma_channel_config chain_config = dma_channel_get_default_config(DMA_CB_CHANNEL);
-	dma_channel_configure(DMA_CB_CHANNEL,
-                          &chain_config,
-                          &dma_channel_hw_addr(
-                                  DMA_CHANNEL)->al3_read_addr_trig,  // ch DMA config (target "ring" buffer size 4) - this is (read_addr trigger)
-                          NULL, // set later
-                          1,
+	dma_channel_config channel_config_b = dma_channel_get_default_config(DMA_CHANNEL_B);
+	channel_config_set_dreq(&channel_config_b, pio_get_dreq(pio, sm, true));
+	channel_config_set_transfer_data_size(&channel_config_b, DMA_SIZE_32);
+	//channel_config_set_chain_to(&channel_config_b, DMA_CHANNEL_A);
+	channel_config_set_irq_quiet(&channel_config_b, false);
+	channel_config_set_ring(&channel_config_b, true, 1);
+	dma_channel_configure(DMA_CHANNEL_B,
+                          &channel_config_b,
+                          &pio->txf[sm],
+                          dma_address[DMA_CHANNEL_B], // 
+                          BYTES_PER_FRAME/4,
                           false
 			);
 
-	irq_set_exclusive_handler(DMA_IRQ_0, dma_complete_handler);
-	dma_channel_set_irq0_enabled(DMA_CHANNEL, true);
+	irq_set_exclusive_handler(DMA_IRQ_0, dma_complete_handler_a);
+	irq_set_exclusive_handler(DMA_IRQ_1, dma_complete_handler_b);
+
+	dma_channel_set_irq0_enabled(DMA_CHANNEL_A, true);
+	dma_channel_set_irq1_enabled(DMA_CHANNEL_B, true);
+
 	irq_set_enabled(DMA_IRQ_0, true);
+	irq_set_enabled(DMA_IRQ_1, true);
+
+	dma_start_channel_mask(DMA_CHANNELS_MASK);
 }
 
-void __isr dma_complete_handler() {
-    if (dma_hw->ints0 & DMA_CHANNEL_MASK) {
-        // clear IRQ
-        dma_hw->ints0 = DMA_CHANNEL_MASK;
-        // when the dma is complete we start the reset delay timer
-        //if (reset_delay_alarm_id) cancel_alarm(reset_delay_alarm_id);
-        //reset_delay_alarm_id = add_alarm_in_us(400, reset_delay_complete, NULL, true);
-    }
+void __isr dma_complete_handler_a() {
+	// clear IRQ
+	dma_hw->ints0 |= DMA_CHANNEL_A_MASK;
+	do_render_frame(DMA_CHANNEL_A);	
+	dma_channel_set_read_addr(DMA_CHANNEL_A, dma_address[DMA_CHANNEL_A], true);
+	check_should_i_die();
+}
+void __isr dma_complete_handler_b(){
+	dma_hw->ints1 |= DMA_CHANNEL_B_MASK;
+	do_render_frame(DMA_CHANNEL_B);
+	dma_channel_set_read_addr(DMA_CHANNEL_B, dma_address[DMA_CHANNEL_B], true);
 }
 
-void core1_entry(){
+void __attribute__((noinline, section(".time_critical"))) core1_entry(){
 	int32_t seed = 0;
 	for( uint8_t i = 0; i <32; i++){
 		seed |= (rosc_hw->randombit<<i);
 	}
 	srand(seed);
 
-	PIO pio = pio0;
+	pio = pio0;
 	uint offset = pio_add_program(pio, &led_pio_program);
-	uint sm = pio_claim_unused_sm(pio, true);
+	sm = pio_claim_unused_sm(pio, true);
 	led_pio_program_init(pio, sm, offset);
 
-	bool STATUS_LED_STATE = false;
-
-	
 	gpio_init(PIN_STATUS_LED);
 	gpio_set_dir(PIN_STATUS_LED, GPIO_OUT);
 
-
 	dma_init(pio, sm);
 
-	absolute_time_t start_time;
-	absolute_time_t end_time;
-	uint32_t i = 0;
 	while (true) {
+		sleep_ms(1000);
+		printf("core1 IDLE heartbeat %" PRId64 "\n", get_absolute_time());
+		check_should_i_die();
+	}
+}
 
-		start_time = get_absolute_time();
-		update_frame_matrix(&frame_matrix, i);
-		end_time = get_absolute_time();
-		if(i > 1000){
-			printf("matrix_time: %" PRId64 "  ", absolute_time_diff_us(start_time, end_time));
-		}
-
-
-
-		start_time = get_absolute_time();
-		render_led_frame(pio, sm, &frame_matrix);
-		end_time = get_absolute_time();
-
-		uint64_t render_time = absolute_time_diff_us(start_time, end_time);
-		if(render_time < MIN_FRAME_TIME){
-			sleep_us(MIN_FRAME_TIME-render_time);
-		}
-
-		if(i > 1000){
-			printf("frame_time: %" PRId64 "  sleep_time: %" PRId64 "  ", render_time, MIN_FRAME_TIME-render_time);
-		}
-
-		start_time = get_absolute_time();
-		update_dim();
-		end_time = get_absolute_time();
-		if(i > 1000){
-			printf("dim_time: %" PRId64 "  ", absolute_time_diff_us(start_time, end_time));
-		}
-
-		start_time = get_absolute_time();
-		gpio_put(PIN_STATUS_LED, STATUS_LED_STATE);
-		STATUS_LED_STATE = !(STATUS_LED_STATE);
-		end_time = get_absolute_time();
-		if(i > 1000){
-			printf("status_time: %" PRId64 "\n", absolute_time_diff_us(start_time, end_time));
-		}
-		i++;
-		if(i > 1001){
-			i = 1;
-		}
-		if(i % 100 == 0){
-			printf("Checking multicore_fifo_rvalid\n");
-			if(multicore_fifo_rvalid()){
-				printf("Got message on fifo, killing core1\n");
-				//If we got something on the fifo, it's time to die.
-				pio_sm_set_enabled(pio, sm, false);
-			 	pio_sm_unclaim(pio, sm);
-				multicore_fifo_push_blocking(1);
-				return;
-			}
-		}
-	
+void __attribute__((section(".time_critical"))) check_should_i_die(){
+	if(multicore_fifo_rvalid()){
+		printf("rvalid on fifo, checking for message\n");
+		uint32_t val = multicore_fifo_pop_blocking();
+		printf("Got message [0x%x] on fifo, killing core1\n", val);
+		//If we got something on the fifo, it's time to die.
+		irq_set_enabled(DMA_IRQ_0, false);
+		irq_set_enabled(DMA_IRQ_1, false);
+		pio_sm_set_enabled(pio, sm, false);
+		pio_sm_unclaim(pio, sm);
+		multicore_fifo_push_blocking(0xDEADBEEF);
+		busy_wait_ms(200);
 	}
 
 	return;
+}
+
+void __attribute__((section(".time_critical"))) do_render_frame(uint8_t dma_channel_output){	
+	//absolute_time_t start_time = get_absolute_time();
+
+	//start_time = get_absolute_time();
+	update_frame_matrix(&frame_matrix, program_counter);
+	//end_time = get_absolute_time();
+	//if(program_counter == 950)
+	//	printf("matrix_time: %" PRId64 "  ", absolute_time_diff_us(start_time, end_time));
+	
+
+
+//	start_time = get_absolute_time();
+	render_led_frame(&frame_matrix, dma_channel_output);
+//	end_time = get_absolute_time();
+
+//	uint64_t render_time = absolute_time_diff_us(start_time, end_time);
+	//if(render_time < MIN_FRAME_TIME){
+	//	sleep_us(MIN_FRAME_TIME-render_time);
+	//}
+
+	//if(program_counter == 950){
+//		printf("frame_time: %" PRId64 "  sleep_time: %" PRId64 "  ", render_time, MIN_FRAME_TIME-render_time);
+//	}
+
+//	start_time = get_absolute_time();
+	update_dim();
+//	end_time = get_absolute_time();
+//	if(program_counter == 950){
+//		printf("dim_time: %" PRId64 "  ", absolute_time_diff_us(start_time, end_time));
+//	}
+
+//	start_time = get_absolute_time();
+	gpio_put(PIN_STATUS_LED, STATUS_LED_STATE);
+	STATUS_LED_STATE = !(STATUS_LED_STATE);
+//	end_time = get_absolute_time();
+	//if(i == 950){
+	//	printf("status_time: %" PRId64 "\n", absolute_time_diff_us(start_time, end_time));
+	//}
+	
+	program_counter++;
+	if(program_counter > 1001){
+		printf("do_render_frame loop at 1k - %" PRId64 "\n", get_absolute_time() );
+		program_counter = 1;
+	}
 }
 
 
@@ -342,6 +402,45 @@ void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_ra
                 }
         }
 }
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_random_brightness_test(frame_matrix_t *frame_matrix, uint32_t i){
+	int32_t val;
+	if(dim == DIM_MIN){
+		val = rand();
+		frame_matrix->pixel[0][0] = val;
+	}else{
+		val = frame_matrix->pixel[0][0];
+	}
+
+	uint8_t r = (val & 0x0000ff) >> 3;
+        uint8_t b = (val & 0x00ff00) >> 8+3;
+        uint8_t g = (val & 0xff0000) >> 16+3;
+
+	for( int32_t x = 1; x <= 16; x++){
+		for( int32_t y = 1; y<= 16; y++){
+			//uint32_t r_final = (r-dim)/4;
+			//uint32_t b_final = (b-dim)/4;
+			//uint32_t g_final = (g-dim)/4;
+			//if(r_final > 64) r_final = 0;
+			//if(b_final > 64) b_final = 0;
+			//if(g_final > 64) g_final = 0;
+
+			//frame_matrix->pixel[x][y] = (r_final) | (b_final << 8) | (g_final << 16);
+			frame_matrix->pixel[x][y] = (0x0) | (0x0 << 8) | (dim << 16);
+		}
+
+	}
+}
+
+void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_kxtj3(frame_matrix_t *frame_matrix, uint32_t i){
+	int32_t val;
+	for( int32_t x = 1; x <= 16; x++){
+		for( int32_t y = 1; y <= 16; y++){
+			int32_t chance = dim*(x*y)/DIM_MAX;
+			//frame_matrix->pixel[x][y] = (chance*r/256) | ((chance*b/256) << 8) | ((chance*g/256) << 16);
+		}
+	}
+
+}
 
 void __attribute__((noinline, section(".time_critical"))) update_dim(){
 	if(dim_polarity){
@@ -365,6 +464,7 @@ void __attribute__((noinline, section(".time_critical"))) update_dim(){
 
 	return;
 }
+
 /*
 void __attribute__((noinline, section(".time_critical"))) randomize_color(){
         color_red += rand()/ (RAND_MAX >> 4);
@@ -389,27 +489,81 @@ void __attribute__((noinline, section(".time_critical"))) randomize_color(){
 }
 */
 
-void __attribute__((noinline, section(".time_critical"))) render_led_frame(PIO pio, uint sm, frame_matrix_t *frame_matrix){
-        for(int32_t pwm = 0; pwm < 64; pwm++){
-                for(int32_t y = 1; y <= 16; y++){
-			for(int32_t x = 16; x >= 1; x-=2){
-			uint32_t buf;
-			int32_t chance = 0;
-			int32_t chance1 = 0;
-			buf = DEFAULT_PIXEL_PACKET |
-                                ( (chance  + ((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE0 + RED   ) | ( (chance  + ((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE1 + RED   ) |
-                                ( (chance1 + ((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE2 + RED   ) | ( (chance1 + ((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE3 + RED   ) |
-                                ( (chance  + ((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE0 + BLUE  ) | ( (chance  + ((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE1 + BLUE  ) |
-                                ( (chance1 + ((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE2 + BLUE  ) | ( (chance1 + ((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE3 + BLUE  ) |
-                                ( (chance  + ((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE0 + GREEN ) | ( (chance  + ((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE1 + GREEN ) |
-                                ( (chance1 + ((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE2 + GREEN ) | ( (chance1 + ((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE3 + GREEN ) |
-                                ( (x!=y) << BYTE0 + ROW   ) | ((x!=y) << BYTE1 + ROW   ) |
-                                ( (x-1!=y) << BYTE2 + ROW   ) | ((x-1!=y) << BYTE3 + ROW   );
-                        pio_sm_put_blocking(pio, sm, buf);
-			pio_sm_put_blocking(pio, sm, DEFAULT_FLUSH_PACKET);
-			}
-                	pio_sm_put_blocking(pio, sm, DEFAULT_LATCH_PACKET);
-			pio_sm_put_blocking(pio, sm, DEFAULT_FLUSH_PACKET);
+#define PIXEL_PACKET(...) \
+	*buf = DEFAULT_PIXEL_PACKET | \
+		( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE0 + RED   ) | ( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE1 + RED   ) | \
+		( (((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE2 + RED   ) | ( (((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE3 + RED   ) | \
+		( (((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE0 + BLUE  ) | ( (((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE1 + BLUE  ) | \
+		( (((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE2 + BLUE  ) | ( (((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE3 + BLUE  ) | \
+		( (((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE0 + GREEN ) | ( (((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE1 + GREEN ) | \
+		( (((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE2 + GREEN ) | ( (((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE3 + GREEN ) | \
+		( (x!=y) << BYTE0 + ROW   ) | ((x!=y) << BYTE1 + ROW   ) | \
+		( (x-1!=y) << BYTE2 + ROW   ) | ((x-1!=y) << BYTE3 + ROW   ); \
+		buf++;
+		//pio->txf[sm] = buf;
+		//pio_sm_put_blocking(pio, sm, buf);
+
+
+/*#define PIXEL_PACKET(...) \
+        *buf = DEFAULT_PIXEL_PACKET; \
+                *buf |= ( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE0 + RED   ); \
+		*buf |= ( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE1 + RED   ); \
+                *buf |= ( (((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE2 + RED   ); \
+		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE3 + RED   ); \
+                *buf |= ( (((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE0 + BLUE  ); \
+		*buf |= ( (((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE1 + BLUE  ); \
+		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE2 + BLUE  ); \
+		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE3 + BLUE  ); \
+		*buf |= ( (((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE0 + GREEN ); \
+		*buf |= ( (((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE1 + GREEN ); \
+		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE2 + GREEN ); \
+		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE3 + GREEN ); \
+                *buf |= ( (x!=y) << BYTE0 + ROW   ) | ((x!=y) << BYTE1 + ROW   ); \
+                *buf |= ( (x-1!=y) << BYTE2 + ROW   ) | ((x-1!=y) << BYTE3 + ROW   ); \
+                buf++;
+*/
+void __attribute__((section(".time_critical"))) render_led_frame(frame_matrix_t register *frame_matrix, uint8_t dma_channel){
+	uint32_t register *buf = dma_address[dma_channel];
+        for(uint8_t register pwm = 0; pwm < PWM_MAX; pwm++){
+                for(uint8_t register y = 1; y <= X_PER_Y; y++){
+			//for(int32_t x = 16; x > 1; x-=2){
+			uint8_t register x;
+
+			x = 16;
+			PIXEL_PACKET();
+
+			x = 14;
+			PIXEL_PACKET();
+
+			x = 12;
+			PIXEL_PACKET();
+
+			x = 10;
+			PIXEL_PACKET();
+
+			x = 8;
+			PIXEL_PACKET();
+
+			x = 6;
+			PIXEL_PACKET();
+			
+			x = 4;
+			PIXEL_PACKET();
+
+			x = 2;
+			PIXEL_PACKET();
+
+
+
+
+				//pio_sm_put_blocking(pio, sm, DEFAULT_FLUSH_PACKET);
+			//}
+			*buf = DEFAULT_LATCH_PACKET;
+			buf++;
+			*buf = DEFAULT_FLUSH_PACKET;
+			buf++;
+                	//pio_sm_put_blocking(pio, sm, DEFAULT_LATCH_PACKET);
+			//pio_sm_put_blocking(pio, sm, DEFAULT_FLUSH_PACKET);
                 }
         }
 	return;
