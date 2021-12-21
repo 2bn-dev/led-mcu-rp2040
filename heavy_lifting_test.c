@@ -26,15 +26,17 @@ uint32_t * dma_address[2];
 PIO pio;
 uint sm;
 
-bool STATUS_LED_STATE = false;
+static bool STATUS_LED_STATE = false;
+static bool AM_I_DEAD = false;
 
 void flash_pending_cb(){
-	printf("Received flash pending callback, attempting to kill core1\n");
+	_DBG("Received flash pending callback, attempting to kill core1");
 	multicore_fifo_push_blocking(0xdead);
-	printf("Successfully sent core1 death signal, checking for response\n");
+	_DBG("Successfully sent core1 death signal, checking for response");
 
+	busy_wait_ms(100);
 	uint32_t ret = multicore_fifo_pop_blocking(); // Return when we receive a response
-	printf("Received response from core1 0x%x", ret);
+	_DBG("Received response from core1 0x%x", ret);
 	return;
 }
 
@@ -50,9 +52,16 @@ int main() {
         tumt_uart_bridge_uart1_init(921600);
         tumt_uart_bridge_pin_init();
 
+	uint32_t i = 0;
 	while(true){
-		printf("core0 Alive! %" PRId64 "\n", get_absolute_time());
-		sleep_ms(1000);
+		if(i == 1000){
+			_DBG("core0 Alive! %" PRId64 "", get_absolute_time());
+			i = 0;
+		}
+
+		//tumt_periodic_task();
+		sleep_ms(1);
+		i++;
 	}
 
 	return 0;
@@ -126,8 +135,8 @@ void dma_init(PIO pio, uint sm){
 	dma_channel_configure(DMA_CHANNEL_A,
         		&channel_config_a,
 			&pio->txf[sm],
-			dma_address[DMA_CHANNEL_A], // 
-			BYTES_PER_FRAME/4, // 4 bytes per packet, 8 packets per X, 16 Y, 64 PWM
+			dma_address[DMA_CHANNEL_A],
+			BYTES_PER_FRAME/4, // 4 bytes per packet, 8 packets per X, 2 packets per row,  16 Y, 64 PWM
 			false
 			);
 
@@ -140,7 +149,7 @@ void dma_init(PIO pio, uint sm){
 	dma_channel_configure(DMA_CHANNEL_B,
                           &channel_config_b,
                           &pio->txf[sm],
-                          dma_address[DMA_CHANNEL_B], // 
+                          dma_address[DMA_CHANNEL_B],
                           BYTES_PER_FRAME/4,
                           false
 			);
@@ -160,9 +169,11 @@ void dma_init(PIO pio, uint sm){
 void __isr dma_complete_handler_a() {
 	// clear IRQ
 	dma_hw->ints0 |= DMA_CHANNEL_A_MASK;
+
+	if(check_should_i_die())
+		return;
 	do_render_frame(DMA_CHANNEL_A);	
 	dma_channel_set_read_addr(DMA_CHANNEL_A, dma_address[DMA_CHANNEL_A], true);
-	check_should_i_die();
 }
 void __isr dma_complete_handler_b(){
 	dma_hw->ints1 |= DMA_CHANNEL_B_MASK;
@@ -188,27 +199,35 @@ void __attribute__((noinline, section(".time_critical"))) core1_entry(){
 	dma_init(pio, sm);
 
 	while (true) {
-		sleep_ms(1000);
-		printf("core1 IDLE heartbeat %" PRId64 "\n", get_absolute_time());
-		check_should_i_die();
+		sleep_ms(100);
+		_DBG("core1 IDLE heartbeat %" PRId64 "", get_absolute_time());
+		if(check_should_i_die()){
+			printf("\n\n------------------------\n");
+			printf("------ CORE1 EXIT ------\n");
+			printf("------------------------\n\n\n");
+			fflush(stdout);
+			sleep_ms(100);
+			return;
+		}
 	}
 }
 
-void __attribute__((section(".time_critical"))) check_should_i_die(){
+bool __attribute__((section(".time_critical"))) check_should_i_die(){
 	if(multicore_fifo_rvalid()){
-		printf("rvalid on fifo, checking for message\n");
+		_DBG("core1: rvalid on fifo, checking for message");
 		uint32_t val = multicore_fifo_pop_blocking();
-		printf("Got message [0x%x] on fifo, killing core1\n", val);
+		_DBG("core1: Got message [0x%x] on fifo, killing core1", val);
 		//If we got something on the fifo, it's time to die.
 		irq_set_enabled(DMA_IRQ_0, false);
 		irq_set_enabled(DMA_IRQ_1, false);
 		pio_sm_set_enabled(pio, sm, false);
 		pio_sm_unclaim(pio, sm);
 		multicore_fifo_push_blocking(0xDEADBEEF);
-		busy_wait_ms(200);
+		_DBG("core1: DMA/PIO have stopped");
+		AM_I_DEAD = true;
 	}
 
-	return;
+	return AM_I_DEAD;
 }
 
 void __attribute__((section(".time_critical"))) do_render_frame(uint8_t dma_channel_output){	
@@ -252,7 +271,7 @@ void __attribute__((section(".time_critical"))) do_render_frame(uint8_t dma_chan
 	
 	program_counter++;
 	if(program_counter > 1001){
-		printf("do_render_frame loop at 1k - %" PRId64 "\n", get_absolute_time() );
+		//printf("do_render_frame loop at 1k - %" PRId64 "\n", get_absolute_time() );
 		program_counter = 1;
 	}
 }
@@ -465,30 +484,6 @@ void __attribute__((noinline, section(".time_critical"))) update_dim(){
 	return;
 }
 
-/*
-void __attribute__((noinline, section(".time_critical"))) randomize_color(){
-        color_red += rand()/ (RAND_MAX >> 4);
-        color_green += rand()/(RAND_MAX >> 4);
-        color_blue += rand()/ (RAND_MAX >> 4);
-
-	printf("Random Color: R: %d, G: %d, B: %d\n", color_red, color_green, color_blue);
-
-        if(color_red > 64){
-        	color_red = 0;
-        }
-
-        if(color_green > 64){
-        	color_green = 0;
-        }
-
-        if(color_blue > 64){
-        	color_blue = 0;
-        }
-
-	return;
-}
-*/
-
 #define PIXEL_PACKET(...) \
 	*buf = DEFAULT_PIXEL_PACKET | \
 		( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE0 + RED   ) | ( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE1 + RED   ) | \
@@ -503,25 +498,6 @@ void __attribute__((noinline, section(".time_critical"))) randomize_color(){
 		//pio->txf[sm] = buf;
 		//pio_sm_put_blocking(pio, sm, buf);
 
-
-/*#define PIXEL_PACKET(...) \
-        *buf = DEFAULT_PIXEL_PACKET; \
-                *buf |= ( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE0 + RED   ); \
-		*buf |= ( (((frame_matrix->pixel[x][y]   & 0x0000FF) >> 0 ) > pwm) << BYTE1 + RED   ); \
-                *buf |= ( (((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE2 + RED   ); \
-		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0x0000FF) >> 0 ) > pwm) << BYTE3 + RED   ); \
-                *buf |= ( (((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE0 + BLUE  ); \
-		*buf |= ( (((frame_matrix->pixel[x][y]   & 0x00FF00) >> 8 ) > pwm) << BYTE1 + BLUE  ); \
-		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE2 + BLUE  ); \
-		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0x00FF00) >> 8 ) > pwm) << BYTE3 + BLUE  ); \
-		*buf |= ( (((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE0 + GREEN ); \
-		*buf |= ( (((frame_matrix->pixel[x][y]   & 0xFF0000) >> 16) > pwm) << BYTE1 + GREEN ); \
-		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE2 + GREEN ); \
-		*buf |= ( (((frame_matrix->pixel[x-1][y] & 0xFF0000) >> 16) > pwm) << BYTE3 + GREEN ); \
-                *buf |= ( (x!=y) << BYTE0 + ROW   ) | ((x!=y) << BYTE1 + ROW   ); \
-                *buf |= ( (x-1!=y) << BYTE2 + ROW   ) | ((x-1!=y) << BYTE3 + ROW   ); \
-                buf++;
-*/
 void __attribute__((section(".time_critical"))) render_led_frame(frame_matrix_t register *frame_matrix, uint8_t dma_channel){
 	uint32_t register *buf = dma_address[dma_channel];
         for(uint8_t register pwm = 0; pwm < PWM_MAX; pwm++){
@@ -556,14 +532,11 @@ void __attribute__((section(".time_critical"))) render_led_frame(frame_matrix_t 
 
 
 
-				//pio_sm_put_blocking(pio, sm, DEFAULT_FLUSH_PACKET);
 			//}
 			*buf = DEFAULT_LATCH_PACKET;
 			buf++;
 			*buf = DEFAULT_FLUSH_PACKET;
 			buf++;
-                	//pio_sm_put_blocking(pio, sm, DEFAULT_LATCH_PACKET);
-			//pio_sm_put_blocking(pio, sm, DEFAULT_FLUSH_PACKET);
                 }
         }
 	return;

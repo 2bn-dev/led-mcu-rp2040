@@ -96,7 +96,7 @@ void dma_init(PIO pio, uint sm);
 void __isr dma_complete_handler_a();
 void __isr dma_complete_handler_b();
 void core1_entry();
-void __attribute__((section(".time_critical"))) check_should_i_die();
+bool __attribute__((section(".time_critical"))) check_should_i_die();
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_row_by_row_y(frame_matrix_t *frame_matrix, uint32_t i);
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_row_by_row_x(frame_matrix_t *frame_matrix, uint32_t i);
 void __attribute__((noinline, section(".time_critical"))) update_frame_matrix_scan_x_y(frame_matrix_t *frame_matrix, uint32_t i);
