@@ -15,23 +15,23 @@ include(../tinyusb-multitool/CMakeLists.txt)
 include(../kxtj3/CMakeLists.txt)
 
 
-add_executable(heavy_lifting_test
-	heavy_lifting_test.c
+add_executable(led_matrix_controller
+	main.c
 )
 
 pico_generate_pio_header(
-	heavy_lifting_test 
+	led_matrix_controller
 	${CMAKE_CURRENT_LIST_DIR}/pinout/2bn-mcumz16163-a.pio
 	)
 pico_generate_pio_header(
-	heavy_lifting_test
+	led_matrix_controller
 	${CMAKE_CURRENT_LIST_DIR}/led_dma.pio
 	)
 
 
 # Add pico_stdlib library which aggregates commonly used features
 target_link_libraries(
-	heavy_lifting_test
+	led_matrix_controller
        	pico_stdlib 
 	hardware_pio
 	pico_time
@@ -44,12 +44,12 @@ target_link_libraries(
 	pico_stdio_uart
 	)
 
-pico_enable_stdio_usb(heavy_lifting_test 0)
-pico_enable_stdio_uart(heavy_lifting_test 1)
+pico_enable_stdio_usb(led_matrix_controller 0)
+pico_enable_stdio_uart(led_matrix_controller 0)
 
 
 
 # create map/bin/hex/uf2 file in addition to ELF.
-pico_add_extra_outputs(heavy_lifting_test)
+pico_add_extra_outputs(led_matrix_controller)
 
 
