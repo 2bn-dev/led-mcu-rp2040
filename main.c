@@ -6,7 +6,7 @@
 #define PICO_STDOUT_MUTEX 0
 
 
-#include "heavy_lifting_test.h"
+#include "main.h"
 #include "tinyusb_multitool.h"
 #include "pico/stdio_uart.h"
 #include "kxtj3.h"
